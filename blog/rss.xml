@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+  <channel>
+    <title>ASKIB blog</title>
+    <link>https://kinggomzy.github.io/askib-preview/blog</link>
+    <description>Guides on testing, calibration and equipment from ASKIB.</description>
+    <language>en-in</language>
+    <atom:link href="https://kinggomzy.github.io/askib-preview/blog/rss.xml" rel="self" type="application/rss+xml" />
+    <item>
+      <title>A simple care checklist for compression testing machines</title>
+      <link>https://kinggomzy.github.io/askib-preview/blog/compression-testing-machine-care-checklist</link>
+      <guid isPermaLink="true">https://kinggomzy.github.io/askib-preview/blog/compression-testing-machine-care-checklist</guid>
+      <pubDate>Mon, 26 Oct 2026 15:28:48 GMT</pubDate>
+      <description>A few minutes of routine care keeps a compression testing machine accurate and safe. Use this checklist for daily, monthly and yearly checks, and know when…</description>
+    </item>
+    <item>
+      <title>Cement testing: what the standard tests tell you</title>
+      <link>https://kinggomzy.github.io/askib-preview/blog/cement-testing-explained</link>
+      <guid isPermaLink="true">https://kinggomzy.github.io/askib-preview/blog/cement-testing-explained</guid>
+      <pubDate>Thu, 22 Oct 2026 15:28:48 GMT</pubDate>
+      <description>Fineness, consistency, setting time, soundness and strength: the standard cement tests, what each one protects you from, and why a batch should be checked…</description>
+    </item>
+    <item>
+      <title>Aggregate testing basics: sieve analysis, specific gravity and impact value</title>
+      <link>https://kinggomzy.github.io/askib-preview/blog/aggregate-testing-basics</link>
+      <guid isPermaLink="true">https://kinggomzy.github.io/askib-preview/blog/aggregate-testing-basics</guid>
+      <pubDate>Fri, 16 Oct 2026 15:28:48 GMT</pubDate>
+      <description>Aggregates make up most of the volume of concrete. These are the tests that show whether a stone or sand source is fit to use, and what each result means for…</description>
+    </item>
+    <item>
+      <title>Core cutting and core strength testing: when cubes are not enough</title>
+      <link>https://kinggomzy.github.io/askib-preview/blog/core-cutting-and-core-strength-testing</link>
+      <guid isPermaLink="true">https://kinggomzy.github.io/askib-preview/blog/core-cutting-and-core-strength-testing</guid>
+      <pubDate>Sat, 10 Oct 2026 15:28:48 GMT</pubDate>
+      <description>When cubes fail, were not cast, or an old structure needs assessing, cores cut from the concrete itself show its actual strength.</description>
+    </item>
+    <item>
+      <title>Rebound hammer test: what it can and cannot tell you</title>
+      <link>https://kinggomzy.github.io/askib-preview/blog/rebound-hammer-test-explained</link>
+      <guid isPermaLink="true">https://kinggomzy.github.io/askib-preview/blog/rebound-hammer-test-explained</guid>
+      <pubDate>Fri, 02 Oct 2026 15:28:48 GMT</pubDate>
+      <description>The rebound hammer is a quick, non-destructive way to compare the surface hardness of concrete.</description>
+    </item>
+    <item>
+      <title>Why calibrating your testing machine matters, and how often to do it</title>
+      <link>https://kinggomzy.github.io/askib-preview/blog/why-calibrate-testing-machines</link>
+      <guid isPermaLink="true">https://kinggomzy.github.io/askib-preview/blog/why-calibrate-testing-machines</guid>
+      <pubDate>Tue, 22 Sep 2026 15:28:48 GMT</pubDate>
+      <description>A testing machine that reads two per cent high can pass concrete that should have failed.</description>
+    </item>
+    <item>
+      <title>How concrete cube compressive strength testing works</title>
+      <link>https://kinggomzy.github.io/askib-preview/blog/concrete-cube-compressive-strength-test</link>
+      <guid isPermaLink="true">https://kinggomzy.github.io/askib-preview/blog/concrete-cube-compressive-strength-test</guid>
+      <pubDate>Thu, 10 Sep 2026 15:28:47 GMT</pubDate>
+      <description>Concrete cubes are cast on site, cured and crushed at 7 and 28 days. Here is what the test measures, how to cast a cube correctly and how to read the result.</description>
+    </item>
+  </channel>
+</rss>
