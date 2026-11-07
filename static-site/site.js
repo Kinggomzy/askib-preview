@@ -5,16 +5,16 @@
  * notice where each form would be. This script swaps that notice for a plain
  * form, and adds search over a prebuilt index.
  *
- * Forms are sent to our own Google Apps Script (static-site/form-handler.gs),
- * which emails the office and saves each enquiry to a Google Sheet. It is free
- * and runs on the company's own Google account. Paste its web app address
- * (ending in /exec) below; see static-site/README.md for the setup.
+ * Forms are sent to our own form handler (static-site/worker/worker.js, a
+ * free Cloudflare Worker), which emails the enquiry from info@askib.in through
+ * Microsoft 365 and adds it to the enquiries Excel workbook on OneDrive.
+ * Paste the worker's address below; see static-site/worker/README.md.
  */
 ;(() => {
   'use strict'
 
   // ── Settings ───────────────────────────────────────────────────────────────
-  const FORM_ENDPOINT = '' // ← paste the Apps Script web app address here
+  const FORM_ENDPOINT = '' // ← paste the form handler's address here (https://….workers.dev)
   const OFFICE_EMAIL = 'info@askib.in'
   const OFFICE_PHONE = '+91 91637 90000'
   const BASE = '' // the site is served from the domain root
@@ -406,12 +406,11 @@
       button.disabled = true
       button.textContent = 'Sending…'
       try {
-        // text/plain keeps this a "simple" request, which Apps Script accepts from any site.
+        // text/plain keeps this a "simple" request, so the browser needs no preflight.
         const res = await fetch(FORM_ENDPOINT, {
           method: 'POST',
           headers: { 'Content-Type': 'text/plain;charset=utf-8' },
           body: JSON.stringify(payload),
-          redirect: 'follow',
         })
         const json = await res.json().catch(() => ({}))
         if (!res.ok || json.ok !== true) throw new Error(json.error || `HTTP ${res.status}`)
