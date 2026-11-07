@@ -1,0 +1,1 @@
+(globalThis.TURBOPACK||(globalThis.TURBOPACK=[])).push(["object"==typeof document?document.currentScript:void 0,791807,e=>{"use strict";var n=e.i(195838);e.i(640040),e.s(["UnknownConvertedNodeComponent",0,e=>{let{data:o}=e;return(0,n.jsxs)("div",{children:["Unknown converted Slate node: ",(0,n.jsx)("strong",{children:o?.nodeType})]})}])}]);
