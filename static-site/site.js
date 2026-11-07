@@ -3,19 +3,18 @@
  *
  * The static copy has no server, so the React build shows a "preview copy"
  * notice where each form would be. This script swaps that notice for a plain
- * form that sends its answers by email through Web3Forms
- * (https://web3forms.com, free plan), and adds search over a prebuilt index.
+ * form, and adds search over a prebuilt index.
  *
- * To connect the forms, paste the Web3Forms access key below. The key is
- * meant to be public (it only lets people send email to the address it was
- * made for), so it is fine to keep it in this file.
+ * Forms are sent to our own form handler (static-site/worker/worker.js, a
+ * free Cloudflare Worker), which emails the enquiry from info@askib.in through
+ * Microsoft 365 and adds it to the enquiries Excel workbook on OneDrive.
+ * Paste the worker's address below; see static-site/worker/README.md.
  */
 ;(() => {
   'use strict'
 
   // ── Settings ───────────────────────────────────────────────────────────────
-  const WEB3FORMS_ACCESS_KEY = '' // ← paste the key from web3forms.com here
-  const ENDPOINT = 'https://api.web3forms.com/submit'
+  const FORM_ENDPOINT = '' // ← paste the form handler's address here (https://….workers.dev)
   const OFFICE_EMAIL = 'info@askib.in'
   const OFFICE_PHONE = '+91 91637 90000'
   const BASE = '' // the site is served from the domain root
@@ -339,7 +338,7 @@
       ),
     )
 
-    // Honeypot: hidden from people, ticked by bots. Web3Forms drops these.
+    // Honeypot: hidden from people, ticked by bots. The script drops these too.
     form.append(
       h('div', { class: 'askib-hp', 'aria-hidden': 'true' }, h('label', {}, 'Leave this empty ', h('input', { type: 'checkbox', name: 'botcheck', tabindex: '-1', autocomplete: 'off' }))),
     )
@@ -373,7 +372,7 @@
         form.querySelector('[aria-invalid="true"]')?.focus()
         return
       }
-      if (!WEB3FORMS_ACCESS_KEY) {
+      if (!FORM_ENDPOINT) {
         status.className = 'askib-status askib-bad'
         status.replaceChildren('This form is not connected yet. Please email ', h('a', { href: `mailto:${OFFICE_EMAIL}`, text: OFFICE_EMAIL }), ` or call ${OFFICE_PHONE}.`)
         return
@@ -385,32 +384,36 @@
         return
       }
       const ref = reference()
+      const fields = []
       const payload = {
-        access_key: WEB3FORMS_ACCESS_KEY,
+        form: def.title,
+        reference: ref,
         subject: `${def.title} from ${data.get('name')}${data.get('company') ? ` (${data.get('company')})` : ''} · ${ref}`,
-        from_name: 'askib.in website',
-        replyto: data.get('email'),
-        Reference: ref,
-        Form: def.title,
-        Page: location.href,
+        replyTo: data.get('email'),
+        name: data.get('name'),
+        page: location.href,
+        fillMs: Date.now() - startedAt,
+        botcheck: '',
+        fields,
       }
       for (const [k, v] of data) {
         if (k === 'botcheck' || k === 'consent') continue
         const value = String(v).trim()
         if (!value) continue
         const label = k.includes(':') ? k : [...contactFields, ...def.header, { name: 'message', label: 'Message' }].find((f) => f.name === k)?.label || k
-        payload[label] = value
+        fields.push([label, value])
       }
       button.disabled = true
       button.textContent = 'Sending…'
       try {
-        const res = await fetch(ENDPOINT, {
+        // text/plain keeps this a "simple" request, so the browser needs no preflight.
+        const res = await fetch(FORM_ENDPOINT, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
           body: JSON.stringify(payload),
         })
         const json = await res.json().catch(() => ({}))
-        if (!res.ok || json.success === false) throw new Error(json.message || `HTTP ${res.status}`)
+        if (!res.ok || json.ok !== true) throw new Error(json.error || `HTTP ${res.status}`)
         done(form, ref)
       } catch (err) {
         console.error('[askib forms]', err)
