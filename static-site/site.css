@@ -1,0 +1,290 @@
+/* Forms and search for the static copy of askib.in. Uses the site's own colour tokens, so it follows light and dark mode. */
+.askib-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1.75rem;
+  max-width: 860px;
+  margin: 1.5rem 0 2rem;
+  font-size: 1rem;
+  color: var(--foreground);
+}
+.askib-section {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  min-width: 0;
+}
+.askib-section > legend,
+.askib-legend {
+  font-weight: 700;
+  font-size: 1.15rem;
+  margin: 0 0 0.9rem;
+  padding: 0;
+}
+.askib-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem 1.25rem;
+}
+@media (min-width: 40rem) {
+  .askib-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+.askib-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+@media (min-width: 40rem) {
+  .askib-field.askib-half {
+    grid-column: auto;
+  }
+}
+.askib-field > label {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--muted-foreground);
+}
+.askib-field input:not([type='checkbox']),
+.askib-field select,
+.askib-field textarea,
+.askib-search-form input {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  font-size: 16px;
+  color: var(--foreground);
+  background: var(--background);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  padding: 0.7rem 0.85rem;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.askib-field textarea {
+  resize: vertical;
+  min-height: 6.5rem;
+}
+.askib-field input:focus,
+.askib-field select:focus,
+.askib-field textarea:focus,
+.askib-search-form input:focus {
+  outline: none;
+  border-color: var(--ring, var(--brand));
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--ring, var(--brand)) 25%, transparent);
+}
+.askib-field [aria-invalid='true'] {
+  border-color: var(--destructive) !important;
+}
+.askib-check label {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: var(--foreground);
+  cursor: pointer;
+}
+.askib-check input {
+  width: 1.15rem;
+  height: 1.15rem;
+  margin-top: 0.15rem;
+  accent-color: var(--primary);
+  flex: none;
+}
+.askib-check a,
+.askib-help a,
+.askib-status a,
+.askib-done a {
+  text-decoration: underline;
+}
+.askib-err {
+  margin: 0;
+  min-height: 0;
+  font-size: 0.85rem;
+  color: var(--destructive);
+}
+.askib-err:empty {
+  display: none;
+}
+.askib-help {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--muted-foreground);
+}
+.askib-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+.askib-row {
+  margin: 0;
+  border: 1px solid var(--rule);
+  border-radius: 14px;
+  background: var(--card);
+  padding: 1rem 1.1rem 1.1rem;
+  min-width: 0;
+}
+.askib-row > legend {
+  padding: 0 0.35rem;
+  font-weight: 650;
+}
+.askib-primary,
+.askib-secondary,
+.askib-link {
+  font: inherit;
+  cursor: pointer;
+}
+.askib-primary {
+  align-self: flex-start;
+  border: 0;
+  border-radius: 10px;
+  padding: 0.8rem 1.4rem;
+  font-weight: 650;
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+.askib-primary:hover {
+  filter: brightness(1.08);
+}
+.askib-primary:disabled {
+  opacity: 0.65;
+  cursor: progress;
+}
+.askib-secondary {
+  align-self: flex-start;
+  background: transparent;
+  color: var(--foreground);
+  border: 1.5px dashed var(--rule);
+  border-radius: 10px;
+  padding: 0.6rem 1rem;
+  font-weight: 600;
+}
+.askib-secondary:hover {
+  border-color: var(--primary);
+}
+.askib-link {
+  margin-top: 0.75rem;
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--destructive);
+  text-decoration: underline;
+  font-size: 0.9rem;
+}
+.askib-primary:focus-visible,
+.askib-secondary:focus-visible,
+.askib-link:focus-visible {
+  outline: 2px solid var(--ring, var(--brand));
+  outline-offset: 2px;
+}
+.askib-hp {
+  position: absolute;
+  left: -9999px;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+.askib-status:empty {
+  display: none;
+}
+.askib-status {
+  border-radius: 10px;
+  padding: 0.75rem 1rem;
+  font-size: 0.95rem;
+}
+.askib-status.askib-bad {
+  border: 1px solid color-mix(in oklch, var(--destructive) 55%, transparent);
+  background: color-mix(in oklch, var(--destructive) 10%, transparent);
+}
+.askib-done {
+  max-width: 760px;
+  margin: 1.5rem 0 2rem;
+  padding: 1.5rem 1.6rem;
+  border-radius: 16px;
+  border: 1px solid var(--rule);
+  background: var(--card);
+}
+.askib-done:focus {
+  outline: none;
+}
+.askib-done h3 {
+  margin: 0 0 0.6rem;
+  font-size: 1.3rem;
+  font-weight: 700;
+}
+.askib-done p {
+  margin: 0.4rem 0 0;
+}
+
+/* Search */
+.askib-quick {
+  display: block;
+  padding: 0.75rem 1.25rem;
+  border-bottom: 1px solid var(--rule);
+  color: var(--foreground);
+  text-decoration: none;
+}
+.askib-quick:hover,
+.askib-quick:focus-visible {
+  background: var(--concrete);
+}
+.askib-r-title {
+  display: block;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.askib-r-sum {
+  display: block;
+  margin-top: 0.15rem;
+  font-size: 0.875rem;
+  color: var(--muted-foreground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.askib-search-page {
+  max-width: var(--page-max, 80rem);
+  margin: 0 auto;
+  padding: 3rem var(--gutter, 1.25rem) 4rem;
+}
+.askib-search-page h1 {
+  font-size: clamp(2rem, 5vw, 3rem);
+  font-weight: 800;
+  margin: 0 0 1.5rem;
+}
+.askib-search-form {
+  display: flex;
+  gap: 0.75rem;
+  max-width: 760px;
+  margin-bottom: 2rem;
+}
+.askib-search-form .askib-primary {
+  flex: none;
+}
+.askib-results {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  max-width: 860px;
+}
+.askib-result {
+  display: block;
+  padding: 1rem 1.2rem;
+  border: 1px solid var(--rule);
+  border-radius: 14px;
+  background: var(--card);
+  color: var(--foreground);
+  text-decoration: none;
+}
+.askib-result:hover {
+  border-color: var(--primary);
+}
+.askib-result .askib-r-sum {
+  white-space: normal;
+}
