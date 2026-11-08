@@ -6,7 +6,12 @@
 //   1. adds static-site/site.css and site.js to every page,
 //   2. writes static-site/search-index.json (title, description and headings of each page),
 //   3. writes static-site/products.json (product id → name, to prefill "Request a quote" links),
-//   4. adds a /search page, built from the not-found page, that site.js fills with results.
+//   4. adds a /search page, built from the not-found page, that site.js fills with results,
+//   5. writes catalogue-products.json and catalogue-services.json (the lists catalogue.js
+//      searches, filters and sorts), read from the exported /products and /services pages,
+//   6. adds the /spare-parts page (filled from spare-parts.csv by catalogue.js) and the
+//      /testimonial page (the link to send clients; site.js shows the form), and puts the
+//      spare parts in the search index.
 // No dependencies: Node 18+.
 import fs from 'node:fs'
 import path from 'node:path'
@@ -21,7 +26,7 @@ const MARK = '<!-- askib-static-site -->'
 const TAGS = `${MARK}<link rel="stylesheet" href="${base}/static-site/site.css"><script src="${base}/static-site/site.js" defer></script>`
 
 /** Pages left out of search: they have nothing to find or need a server. */
-const NOT_SEARCHED = [/^\/404$/, /^\/search$/, /^\/cart$/, /^\/checkout$/, /^\/track-order$/, /^\/image-credits$/]
+const NOT_SEARCHED = [/^\/404$/, /^\/search$/, /^\/testimonial$/, /^\/spare-parts$/, /^\/cart$/, /^\/checkout$/, /^\/track-order$/, /^\/image-credits$/]
 
 function* htmlFiles(dir) {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -82,6 +87,25 @@ for (const [u, html] of pages) {
   const heads = [...main.matchAll(/<h[1-3][^>]*>([\s\S]*?)<\/h[1-3]>/g)].map((m) => decode(m[1])).filter(Boolean)
   index.push({ u, t: title, d: desc, k: [...new Set(heads)].join(' · ').slice(0, 400) })
 }
+// Spare parts: the page itself and every part, so the site search finds part numbers.
+const csvPath = path.join(outDir, 'spare-parts.csv')
+const parts = fs.existsSync(csvPath) ? parseCsv(fs.readFileSync(csvPath, 'utf8')) : []
+index.push({
+  u: '/spare-parts',
+  t: 'Spare parts',
+  d: 'Spare and replacement parts for testing machines, measuring instruments and lab equipment. Search by part number, make, model and year.',
+  k: 'spares · replacement parts · part number · OEM',
+})
+for (const [i, r] of parts.entries()) {
+  const id = r['ID'] || String(i + 1)
+  const no = r['Part number']
+  index.push({
+    u: `/spare-parts?part=${encodeURIComponent(id)}`,
+    t: `${r['Part name'] || no}${no ? ` (${no})` : ''}`,
+    d: r['Description'] || '',
+    k: [no, r['OEM / alternate numbers'], r['Category'], r['Brand'], r['Fits make'], r['Fits model'], r['Keywords']].filter(Boolean).join(' · ').slice(0, 400),
+  })
+}
 index.sort((a, b) => a.u.localeCompare(b.u))
 fs.mkdirSync(outDir, { recursive: true })
 fs.writeFileSync(path.join(outDir, 'search-index.json'), JSON.stringify(index))
@@ -97,4 +121,100 @@ fs.writeFileSync(path.join(root, 'search.html'), notFound)
 fs.mkdirSync(path.join(root, 'search'), { recursive: true })
 fs.writeFileSync(path.join(root, 'search', 'index.html'), notFound)
 
-console.log(`Tags added to ${injected} pages. Search index: ${index.length} pages. Products: ${Object.keys(products).length}.`)
+// 4. Catalogue lists for catalogue.js, from the React props saved in each listing page.
+function browseProps(html) {
+  const flight = [...html.matchAll(/self\.__next_f\.push\(\[1,("(?:[^"\\]|\\.)*")\]\)/g)].map((m) => JSON.parse(m[1])).join('')
+  const line = flight.split('\n').find((l) => l.includes('"items":[') && l.includes('"filters":['))
+  if (!line) return null
+  const tree = JSON.parse(line.slice(line.indexOf(':') + 1))
+  const find = (n) => {
+    if (!n || typeof n !== 'object') return null
+    if (Array.isArray(n.items) && Array.isArray(n.filters)) return n
+    for (const v of Array.isArray(n) ? n : Object.values(n)) {
+      const r = find(v)
+      if (r) return r
+    }
+    return null
+  }
+  return find(tree)
+}
+const undef = (v) => (v === '$undefined' ? undefined : v)
+let catalogues = 0
+for (const [kind, url] of [['products', '/products'], ['services', '/services']]) {
+  const html = pages.get(url)
+  const props = html && browseProps(html)
+  if (!props) {
+    console.warn(`No list found on ${url}; catalogue-${kind}.json not written.`)
+    continue
+  }
+  const items = props.items.map((x) => ({
+    id: x.id,
+    title: x.title,
+    href: undef(x.href),
+    summary: undef(x.summary),
+    eyebrow: undef(x.eyebrow),
+    image: x.image && undef(x.image) ? { url: x.image.url, alt: undef(x.image.alt) || '' } : null,
+    price: typeof x.sort?.price === 'number' ? x.sort.price : null,
+    newest: typeof x.sort?.newest === 'number' ? x.sort.newest : undefined,
+    priceText: undef(x.price?.text),
+    was: undef(x.price?.was),
+    off: undef(x.price?.off),
+    search: undef(x.search),
+    facets: x.facets || {},
+  }))
+  const filters = props.filters.map((g) => ({ id: g.id, label: g.label, options: g.options }))
+  fs.writeFileSync(path.join(outDir, `catalogue-${kind}.json`), JSON.stringify({ kind, filters, items }))
+  catalogues++
+}
+
+// 5. The /spare-parts and /testimonial pages, from the not-found page.
+const shell = (title, description, robots) =>
+  notFound
+    .replace(/<title>[\s\S]*?<\/title>/, `<title>${title} | ASKIB</title>`)
+    .replace(/<meta name="description" content="[^"]*"\s*\/?>/, `<meta name="description" content="${description}"/>`)
+    .replace(/<meta name="robots" content="[^"]*"\s*\/?>/g, robots ? `<meta name="robots" content="${robots}"/>` : '')
+for (const [slug, html] of [
+  ['spare-parts', shell('Spare parts', 'Spare and replacement parts for testing machines, measuring instruments and lab equipment. Search by part number, make, model and year.', '')],
+  ['testimonial', shell('Share your experience', 'Tell us how ASKIB Engineers helped you.', 'noindex')],
+]) {
+  fs.writeFileSync(path.join(root, `${slug}.html`), html)
+  fs.mkdirSync(path.join(root, slug), { recursive: true })
+  fs.writeFileSync(path.join(root, slug, 'index.html'), html)
+}
+
+console.log(`Tags added to ${injected} pages. Search index: ${index.length} pages. Products: ${Object.keys(products).length}. Catalogue lists: ${catalogues}. Spare parts: ${parts.length}.`)
+
+/** Reads a CSV saved by Excel (commas, quotes, line breaks inside quotes). */
+function parseCsv(text) {
+  const rows = []
+  let row = []
+  let cell = ''
+  let quoted = false
+  text = text.replace(/^\uFEFF/, '')
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i]
+    if (quoted) {
+      if (c === '"' && text[i + 1] === '"') {
+        cell += '"'
+        i++
+      } else if (c === '"') quoted = false
+      else cell += c
+    } else if (c === '"') quoted = true
+    else if (c === ',') {
+      row.push(cell)
+      cell = ''
+    } else if (c === '\n' || c === '\r') {
+      if (c === '\r' && text[i + 1] === '\n') i++
+      row.push(cell)
+      rows.push(row)
+      row = []
+      cell = ''
+    } else cell += c
+  }
+  if (cell || row.length) {
+    row.push(cell)
+    rows.push(row)
+  }
+  const head = (rows.shift() || []).map((x) => x.trim())
+  return rows.filter((r) => r.some((x) => x.trim())).map((r) => Object.fromEntries(head.map((k, i) => [k, (r[i] ?? '').trim()])))
+}

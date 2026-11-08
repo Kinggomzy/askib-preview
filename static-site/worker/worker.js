@@ -41,10 +41,14 @@ const MAX_PER_EMAIL_PER_HOUR = 5
 const MAX_FIELDS = 120
 const MAX_VALUE = 5000
 const MAX_BODY = 200_000
+/** Testimonials carry one photo, already shrunk in the browser (about 100–300 KB). */
+const MAX_TESTIMONIAL_BODY = 1_500_000
+const MAX_PHOTO_BYTES = 1_000_000
 
 // Kept between requests while the worker stays warm.
 let token = null // { value, expires }
-let workbook = null // promise of the workbook's Graph path
+let workbook = null // promise of { wb, drive, parent }: the workbook's Graph path and its folder
+let testimonialSheet = null // promise: the Testimonials sheet exists
 const recent = new Map() // email → [timestamps]
 
 export default {
@@ -53,22 +57,29 @@ export default {
     const allowed = (env.ALLOWED_ORIGINS || 'https://askib.in').split(',').map((s) => s.trim())
     const cors = {
       'Access-Control-Allow-Origin': allowed.includes(origin) ? origin : allowed[0],
-      'Access-Control-Allow-Methods': 'POST, OPTIONS',
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type',
       Vary: 'Origin',
     }
     const json = (obj, status = 200) => new Response(JSON.stringify(obj), { status, headers: { ...cors, 'Content-Type': 'application/json' } })
 
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors })
-    if (request.method === 'GET') return new Response('askib.in form handler is running.', { headers: cors })
+    if (request.method === 'GET') {
+      const { pathname } = new URL(request.url)
+      if (pathname === '/testimonials') return approvedTestimonials(request, env)
+      const photo = pathname.match(/^\/testimonials\/photo\/([A-Za-z0-9-]{4,40})\.jpg$/)
+      if (photo) return testimonialPhoto(request, env, photo[1])
+      return new Response('askib.in form handler is running.', { headers: cors })
+    }
     if (request.method !== 'POST') return json({ ok: false, error: 'method not allowed' }, 405)
     if (!allowed.includes(origin)) return json({ ok: false, error: 'forbidden' }, 403)
 
     let data
     try {
       const text = await request.text()
-      if (text.length > MAX_BODY) return json({ ok: false, error: 'too large' }, 413)
+      if (text.length > MAX_TESTIMONIAL_BODY) return json({ ok: false, error: 'too large' }, 413)
       data = JSON.parse(text)
+      if (data.kind !== 'testimonial' && text.length > MAX_BODY) return json({ ok: false, error: 'too large' }, 413)
     } catch {
       return json({ ok: false, error: 'bad request' }, 400)
     }
@@ -94,6 +105,37 @@ export default {
     times.push(now)
     recent.set(key, times)
     if (recent.size > 5000) recent.clear()
+
+    if (data.kind === 'testimonial') {
+      const t = data.testimonial || {}
+      const entry = {
+        reference,
+        name,
+        email,
+        company: clean(t.company, 200),
+        role: clean(t.role, 120),
+        city: clean(t.city, 120),
+        phone: clean(t.phone, 40),
+        service: clean(t.service, 120),
+        rating: Math.min(5, Math.max(0, Math.round(Number(t.rating) || 0))),
+        text: clean(t.text, 2000),
+        page,
+      }
+      if (!entry.company || entry.text.length < 10) return json({ ok: false, error: 'missing company or testimonial' }, 400)
+      let photo = null
+      if (data.photo) {
+        photo = jpegBytes(data.photo)
+        if (!photo) return json({ ok: false, error: 'the photo must be a JPEG under 1 MB' }, 400)
+      }
+      const [saved, mail] = await Promise.allSettled([
+        saveTestimonial(env, entry, photo),
+        sendTestimonialMail(env, entry, photo, data.photo),
+      ])
+      if (saved.status === 'rejected') console.error('testimonial excel failed:', saved.reason?.message)
+      if (mail.status === 'rejected') console.error('testimonial mail failed:', mail.reason?.message)
+      if (saved.status === 'rejected' && mail.status === 'rejected') return json({ ok: false, error: 'could not deliver' }, 502)
+      return json({ ok: true, reference })
+    }
 
     const subject = clean(data.subject, 200) || `${form} · ${reference}`
     const [mail, row] = await Promise.allSettled([
@@ -174,7 +216,7 @@ async function findWorkbook(env) {
   const item = await graph(env, `/shares/${id}/driveItem?$select=id,name,parentReference`)
   const file = `/drives/${item.parentReference.driveId}/items/${item.id}`
   await setUpWorkbook(env, file, item.name)
-  return `${file}/workbook`
+  return { wb: `${file}/workbook`, drive: item.parentReference.driveId, parent: item.parentReference.id }
 }
 
 const ws = (name) => `worksheets/${encodeURIComponent(name)}`
@@ -223,7 +265,7 @@ async function setUpWorkbook(env, file, currentName) {
 }
 
 async function addRow(env, { form, reference, email, fields, page }) {
-  const wb = await workbookPath(env)
+  const { wb } = await workbookPath(env)
   const get = (label) => (fields.find((f) => f[0] === label) || [])[1] || ''
   const shown = ['Your name', 'Email', 'Phone', 'Company', 'City']
   const details = fields
@@ -251,8 +293,9 @@ async function addRow(env, { form, reference, email, fields, page }) {
   await graph(env, `${wb}/tables/${TABLE}/rows/add`, { method: 'POST', body: JSON.stringify({ values: [values] }) })
 }
 
+const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+
 function mailHtml(form, reference, fields, page) {
-  const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
   const rows = fields
     .map(
       (f) =>
@@ -267,6 +310,266 @@ function mailHtml(form, reference, fields, page) {
     `<table style="border-collapse:collapse">${rows}</table>` +
     `<p style="margin-top:16px;color:#888;font-size:12px">Sent from ${esc(page)}</p></div>`
   )
+}
+
+// ── Testimonials ──────────────────────────────────────────────────────────────
+// Clients send testimonials from askib.in/testimonial. Each one is added to the
+// "Testimonials" sheet with Status "Pending", its photo is saved in the
+// "Testimonial photos" folder next to the workbook, and info@askib.in gets an
+// email with the photo attached. Nothing is shown on the website until someone
+// changes Status to "Approved" in the sheet.
+const T_SHEET = 'Testimonials'
+const T_TABLE = 'TestimonialsTable'
+const T_HEADERS = ['Received', 'Reference', 'Status', 'Name', 'Company', 'Role', 'City', 'Rating', 'Service', 'Testimonial', 'Photo', 'Show on homepage', 'Order', 'Email', 'Phone', 'Notes']
+const T_WIDTHS = [110, 110, 80, 130, 160, 120, 90, 55, 110, 380, 160, 90, 50, 180, 110, 200]
+const PHOTO_FOLDER = 'Testimonial photos'
+const APPROVED = /^(approved|published|yes|live)$/i
+/** How long the website's copy of the approved list and photos is kept before asking Excel again. */
+const LIST_CACHE_SECONDS = 300
+const PHOTO_CACHE_SECONDS = 86400
+
+function jpegBytes(dataUrl) {
+  const m = String(dataUrl).match(/^data:image\/jpeg;base64,([A-Za-z0-9+/=]+)$/)
+  if (!m) return null
+  let bin
+  try {
+    bin = atob(m[1])
+  } catch {
+    return null
+  }
+  if (bin.length > MAX_PHOTO_BYTES || bin.charCodeAt(0) !== 0xff || bin.charCodeAt(1) !== 0xd8) return null
+  const bytes = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+  return bytes
+}
+
+function ensureTestimonialSheet(env, wb) {
+  testimonialSheet ??= setUpTestimonialSheet(env, wb).catch((err) => {
+    testimonialSheet = null
+    throw err
+  })
+  return testimonialSheet
+}
+
+async function setUpTestimonialSheet(env, wb) {
+  const tables = await graph(env, `${wb}/tables?$select=name`)
+  if (tables.value.some((t) => t.name === T_TABLE)) return
+  const sheets = (await graph(env, `${wb}/worksheets?$select=name`)).value.map((s) => s.name)
+  if (!sheets.includes(T_SHEET)) await graph(env, `${wb}/worksheets/add`, { method: 'POST', body: JSON.stringify({ name: T_SHEET }) })
+  const last = col(T_HEADERS.length - 1)
+  await graph(env, `${wb}/${ws(T_SHEET)}/range(address='A1:${last}1')`, { method: 'PATCH', body: JSON.stringify({ values: [T_HEADERS] }) })
+  const table = await graph(env, `${wb}/${ws(T_SHEET)}/tables/add`, {
+    method: 'POST',
+    body: JSON.stringify({ address: `${T_SHEET}!A1:${last}1`, hasHeaders: true }),
+  })
+  await graph(env, `${wb}/tables/${table.id}`, { method: 'PATCH', body: JSON.stringify({ name: T_TABLE, style: 'TableStyleMedium4' }) })
+  await graph(env, `${wb}/${ws(T_SHEET)}/freezePanes/freezeRows`, { method: 'POST', body: JSON.stringify({ count: 1 }) })
+  for (const [i, width] of T_WIDTHS.entries()) {
+    const c = col(i)
+    await graph(env, `${wb}/${ws(T_SHEET)}/range(address='${c}:${c}')/format`, {
+      method: 'PATCH',
+      body: JSON.stringify({ columnWidth: width, wrapText: ['Testimonial', 'Notes'].includes(T_HEADERS[i]), verticalAlignment: 'Top' }),
+    })
+  }
+  // A drop-down on Status so approving is one click.
+  try {
+    await graph(env, `${wb}/${ws(T_SHEET)}/range(address='C2:C2000')/dataValidation`, {
+      method: 'PATCH',
+      body: JSON.stringify({ rule: { list: { inCellDropDown: true, source: 'Pending,Approved,Rejected' } } }),
+    })
+  } catch (err) {
+    console.error('status drop-down not added:', err.message)
+  }
+  if (sheets.includes(GUIDE)) {
+    const used = await graph(env, `${wb}/${ws(GUIDE)}/usedRange?$select=rowCount`)
+    const start = (used?.rowCount || GUIDE_LINES.length) + 2
+    const lines = [
+      'Testimonials',
+      'Clients send testimonials from https://askib.in/testimonial. Each one arrives on the Testimonials sheet with Status "Pending" and is emailed to info@askib.in with the photo attached.',
+      'To show one on the website, change its Status to "Approved". It appears within about 5 minutes. Change it back to "Pending" or "Rejected" to take it down.',
+      'Type "Yes" in "Show on homepage" to feature it on the homepage too. Use "Order" (1, 2, 3…) to choose which come first.',
+      'You can edit the wording (for example to fix a typo) before approving. Photos are in the "Testimonial photos" folder next to this file, named by Reference. Replace a photo by uploading a new file with the same name.',
+      'To add one yourself: add a row, give it a unique Reference (e.g. TST-MANUAL-01), fill Name, Company and Testimonial, and either upload TST-MANUAL-01.jpg to the photos folder or paste a public image link in Photo.',
+    ]
+    await graph(env, `${wb}/${ws(GUIDE)}/range(address='A${start}:A${start + lines.length - 1}')`, {
+      method: 'PATCH',
+      body: JSON.stringify({ values: lines.map((l) => [l]) }),
+    })
+    await graph(env, `${wb}/${ws(GUIDE)}/range(address='A${start}')/format/font`, { method: 'PATCH', body: JSON.stringify({ bold: true, size: 13 }) })
+  }
+}
+
+async function saveTestimonial(env, t, photo) {
+  const info = await workbookPath(env)
+  await ensureTestimonialSheet(env, info.wb)
+  let photoLink = ''
+  if (photo) {
+    const item = await graph(env, `/drives/${info.drive}/items/${info.parent}:/${encodeURIComponent(PHOTO_FOLDER)}/${t.reference}.jpg:/content`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'image/jpeg' },
+      body: photo,
+    })
+    photoLink = item?.webUrl || `${PHOTO_FOLDER}/${t.reference}.jpg`
+  }
+  const received = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' })
+  const byHeader = {
+    Received: received,
+    Reference: t.reference,
+    Status: 'Pending',
+    Name: t.name,
+    Company: t.company,
+    Role: t.role,
+    City: t.city,
+    Rating: t.rating || '',
+    Service: t.service,
+    Testimonial: t.text,
+    Photo: photoLink,
+    'Show on homepage': '',
+    Order: '',
+    Email: t.email,
+    Phone: t.phone,
+    Notes: '',
+  }
+  const safe = (v) => (typeof v === 'string' && /^[=+\-@]/.test(v) ? `'${v}` : v)
+  await graph(env, `${info.wb}/tables/${T_TABLE}/rows/add`, {
+    method: 'POST',
+    body: JSON.stringify({ values: [T_HEADERS.map((h) => safe(byHeader[h]))] }),
+  })
+}
+
+async function sendTestimonialMail(env, t, photo, dataUrl) {
+  const mailbox = env.MAILBOX || 'info@askib.in'
+  const stars = t.rating ? '★'.repeat(t.rating) + '☆'.repeat(5 - t.rating) : 'not given'
+  const rows = [
+    ['Name', t.name],
+    ['Company', t.company],
+    ['Role', t.role],
+    ['City', t.city],
+    ['Email', t.email],
+    ['Phone', t.phone],
+    ['Service used', t.service],
+    ['Rating', stars],
+    ['Photo', photo ? 'attached' : 'none'],
+  ].filter((r) => r[1])
+  const html =
+    `<div style="font-family:Segoe UI,Arial,sans-serif;font-size:14px;color:#111">` +
+    `<h2 style="margin:0 0 4px">New testimonial, waiting for approval</h2>` +
+    `<p style="margin:0 0 16px;color:#555">Reference ${esc(t.reference)}. It is <b>not</b> on the website yet. To publish it, open the ` +
+    `workbook, go to the Testimonials sheet and change its Status to <b>Approved</b>.</p>` +
+    `<blockquote style="margin:0 0 16px;padding:12px 16px;border-left:4px solid #c9a227;background:#f7f5ee;white-space:pre-wrap">${esc(t.text)}</blockquote>` +
+    `<table style="border-collapse:collapse">${rows.map((r) => `<tr><td style="padding:4px 12px 4px 0;color:#555">${esc(r[0])}</td><td>${esc(r[1])}</td></tr>`).join('')}</table></div>`
+  await graph(env, `/users/${encodeURIComponent(mailbox)}/sendMail`, {
+    method: 'POST',
+    body: JSON.stringify({
+      message: {
+        subject: `Testimonial from ${t.name} (${t.company}) · ${t.reference}`,
+        body: { contentType: 'HTML', content: html },
+        toRecipients: [{ emailAddress: { address: mailbox } }],
+        replyTo: [{ emailAddress: { address: t.email, name: t.name } }],
+        attachments: photo
+          ? [
+              {
+                '@odata.type': '#microsoft.graph.fileAttachment',
+                name: `${t.reference}.jpg`,
+                contentType: 'image/jpeg',
+                contentBytes: dataUrl.split(',')[1],
+              },
+            ]
+          : [],
+      },
+      saveToSentItems: false,
+    }),
+  })
+}
+
+/** Approved rows, newest first after any Order numbers. Never includes email or phone. */
+async function readApproved(env) {
+  const { wb } = await workbookPath(env)
+  await ensureTestimonialSheet(env, wb)
+  const [head, body] = await Promise.all([
+    graph(env, `${wb}/tables/${T_TABLE}/headerRowRange?$select=values`),
+    graph(env, `${wb}/tables/${T_TABLE}/dataBodyRange?$select=values`),
+  ])
+  const cols = head.values[0].map((x) => String(x).trim())
+  const at = (row, name) => {
+    const i = cols.indexOf(name)
+    return i < 0 ? '' : String(row[i] ?? '').trim()
+  }
+  const list = []
+  for (const [n, row] of (body?.values || []).entries()) {
+    if (!APPROVED.test(at(row, 'Status'))) continue
+    const reference = at(row, 'Reference').replace(/[^A-Za-z0-9-]/g, '')
+    const text = at(row, 'Testimonial')
+    const name = at(row, 'Name')
+    if (!name || !text) continue
+    const photoCell = at(row, 'Photo')
+    let photo = ''
+    if (/^https:\/\//i.test(photoCell) && !/sharepoint\.com|onedrive\.live\.com|1drv\.ms/i.test(photoCell)) photo = photoCell
+    else if (reference && photoCell) photo = `/testimonials/photo/${reference}.jpg`
+    const order = Number(at(row, 'Order'))
+    list.push({
+      id: reference || `row-${n + 1}`,
+      name,
+      company: at(row, 'Company'),
+      role: at(row, 'Role'),
+      city: at(row, 'City'),
+      service: at(row, 'Service'),
+      rating: Math.min(5, Math.max(0, Number(at(row, 'Rating')) || 0)),
+      text,
+      photo,
+      featured: /^(yes|y|true|1)$/i.test(at(row, 'Show on homepage')),
+      order: Number.isFinite(order) && order > 0 ? order : null,
+      n,
+    })
+  }
+  list.sort((a, b) => (a.order ?? 1e9) - (b.order ?? 1e9) || b.n - a.n)
+  return list.map(({ n, ...x }) => x)
+}
+
+async function approvedTestimonials(request, env) {
+  const cache = caches.default
+  const key = new Request(new URL('/testimonials', request.url).toString())
+  const hit = await cache.match(key)
+  if (hit) return withOpenCors(hit)
+  let list = []
+  try {
+    list = await readApproved(env)
+  } catch (err) {
+    console.error('testimonials read failed:', err.message)
+    return withOpenCors(new Response(JSON.stringify({ ok: false, items: [] }), { status: 503, headers: { 'Content-Type': 'application/json' } }))
+  }
+  const res = new Response(JSON.stringify({ ok: true, items: list }), {
+    headers: { 'Content-Type': 'application/json', 'Cache-Control': `public, max-age=${LIST_CACHE_SECONDS}` },
+  })
+  await cache.put(key, res.clone())
+  return withOpenCors(res)
+}
+
+async function testimonialPhoto(request, env, reference) {
+  const cache = caches.default
+  const key = new Request(new URL(`/testimonials/photo/${reference}.jpg`, request.url).toString())
+  const hit = await cache.match(key)
+  if (hit) return withOpenCors(hit)
+  // Only photos of approved testimonials are served.
+  const list = await readApproved(env).catch(() => [])
+  if (!list.some((t) => t.id === reference && t.photo.startsWith('/testimonials/photo/'))) return withOpenCors(new Response('not found', { status: 404 }))
+  const { drive, parent } = await workbookPath(env)
+  const meta = await graph(env, `/drives/${drive}/items/${parent}:/${encodeURIComponent(PHOTO_FOLDER)}/${reference}.jpg?$select=id,@microsoft.graph.downloadUrl`).catch(() => null)
+  const url = meta?.['@microsoft.graph.downloadUrl']
+  if (!url) return withOpenCors(new Response('not found', { status: 404 }))
+  const file = await fetch(url)
+  if (!file.ok) return withOpenCors(new Response('not found', { status: 404 }))
+  const res = new Response(file.body, {
+    headers: { 'Content-Type': 'image/jpeg', 'Cache-Control': `public, max-age=${PHOTO_CACHE_SECONDS}` },
+  })
+  await cache.put(key, res.clone())
+  return withOpenCors(res)
+}
+
+function withOpenCors(res) {
+  const out = new Response(res.body, res)
+  out.headers.set('Access-Control-Allow-Origin', '*')
+  return out
 }
 
 function clean(v, max) {

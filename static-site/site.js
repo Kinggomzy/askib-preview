@@ -310,8 +310,10 @@
         })
       addRow()
       if (key === 'product') {
-        const id = new URLSearchParams(location.search).get('product')
-        productName(id).then((name) => {
+        const params = new URLSearchParams(location.search)
+        // ?item=… comes from the spare parts list; ?product=… from product pages.
+        const named = params.get('item') ? Promise.resolve(params.get('item').slice(0, 200)) : productName(params.get('product'))
+        named.then((name) => {
           const first = rows.querySelector('input')
           if (name && first && !first.value) first.value = name
         })
@@ -544,6 +546,361 @@
     )
   }
 
+  // ── Testimonials ───────────────────────────────────────────────────────────
+  // /testimonial is the page to send clients to. What they send arrives as
+  // "Pending" in the Testimonials sheet; approved ones are read back from the
+  // form handler and shown, with photos, on /testimonials and the homepage.
+  const SERVICES_USED = ['Calibration', 'Testing', 'Products / equipment', 'Spare parts', 'Repair and maintenance', 'Consultancy', 'Training', 'Something else']
+  const PHOTO_MAX_SIDE = 800
+  const PHOTO_MAX_BYTES = 700_000
+  const PHOTO_MAX_UPLOAD = 15 * 1024 * 1024
+
+  const initials = (name) =>
+    String(name || '')
+      .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((w) => w[0].toUpperCase())
+      .join('') || '?'
+
+  /** A round photo, or the person's initials on a colour picked from their name. */
+  function avatar(name, photo, size = 'md') {
+    let hue = 0
+    for (const c of String(name)) hue = (hue * 31 + c.codePointAt(0)) % 360
+    const el = h('span', { class: `askib-avatar askib-avatar-${size}`, style: `--hue:${hue}`, 'aria-hidden': 'true' }, h('span', { text: initials(name) }))
+    if (photo) {
+      const img = h('img', { src: photo, alt: '', loading: 'lazy', decoding: 'async' })
+      img.addEventListener('error', () => img.remove())
+      el.append(img)
+    }
+    return el
+  }
+
+  function starsEl(n) {
+    if (!n) return null
+    return h('span', { class: 'askib-stars', role: 'img', 'aria-label': `${n} out of 5 stars` }, '★'.repeat(n), h('span', { class: 'askib-stars-off', text: '★'.repeat(5 - n) }))
+  }
+
+  /** Shrinks a photo in the browser: longest side ≤ 800 px, JPEG, under ~700 KB. */
+  async function shrinkPhoto(file) {
+    const url = URL.createObjectURL(file)
+    try {
+      const img = await new Promise((resolve, reject) => {
+        const i = new Image()
+        i.onload = () => resolve(i)
+        i.onerror = () => reject(new Error('unreadable'))
+        i.src = url
+      })
+      const scale = Math.min(1, PHOTO_MAX_SIDE / Math.max(img.naturalWidth, img.naturalHeight))
+      const canvas = document.createElement('canvas')
+      canvas.width = Math.max(1, Math.round(img.naturalWidth * scale))
+      canvas.height = Math.max(1, Math.round(img.naturalHeight * scale))
+      const ctx = canvas.getContext('2d')
+      ctx.fillStyle = '#fff' // transparent PNGs get a white background
+      ctx.fillRect(0, 0, canvas.width, canvas.height)
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+      let data = ''
+      for (const q of [0.85, 0.75, 0.65, 0.5]) {
+        data = canvas.toDataURL('image/jpeg', q)
+        if (data.length * 0.75 < PHOTO_MAX_BYTES) break
+      }
+      return data
+    } finally {
+      URL.revokeObjectURL(url)
+    }
+  }
+
+  function buildTestimonialForm() {
+    const startedAt = Date.now()
+    const params = new URLSearchParams(location.search)
+    const form = h('form', { class: 'askib-form', novalidate: true, [OWN]: 'form' })
+    const section = (title, ...kids) => h('fieldset', { class: 'askib-section' }, h('legend', { text: title }), h('div', { class: 'askib-grid' }, ...kids))
+    const f = (def) => fieldEl(def, def.name, params.get(def.name) || '')
+
+    form.append(
+      section(
+        'About you',
+        f({ name: 'name', label: 'Your name', type: 'text', required: true, half: true, auto: 'name' }),
+        f({ name: 'company', label: 'Company name', type: 'text', required: true, half: true, auto: 'organization' }),
+        f({ name: 'role', label: 'Your role (optional)', type: 'text', half: true, auto: 'organization-title', placeholder: 'e.g. Quality Manager' }),
+        f({ name: 'city', label: 'City (optional)', type: 'text', half: true, auto: 'address-level2' }),
+        f({ name: 'email', label: 'Email (not published)', type: 'email', required: true, half: true, auto: 'email' }),
+        f({ name: 'phone', label: 'Phone (optional, not published)', type: 'tel', half: true, auto: 'tel' }),
+      ),
+    )
+
+    // Star rating: five radio buttons, keyboard friendly.
+    const ratingId = `askib-f${++fieldSeq}`
+    const rating = h('div', { class: 'askib-rating', role: 'radiogroup', 'aria-labelledby': `${ratingId}-l` })
+    for (let n = 5; n >= 1; n--) {
+      const id = `${ratingId}-${n}`
+      rating.append(h('input', { type: 'radio', name: 'rating', id, value: String(n) }), h('label', { for: id, title: `${n} star${n > 1 ? 's' : ''}` }, h('span', { class: 'askib-sr', text: `${n} star${n > 1 ? 's' : ''}` }), '★'))
+    }
+    const service = f({ name: 'service', label: 'What did we help you with?', type: 'select', half: true, options: opt(SERVICES_USED.map((x) => [x, x])) })
+    form.append(
+      section(
+        'Your testimonial',
+        h('div', { class: 'askib-field askib-half' }, h('label', { id: `${ratingId}-l`, text: 'Your rating' }), rating),
+        service,
+        fieldEl({ name: 'text', label: 'Your testimonial', type: 'textarea', required: true, placeholder: 'What did we do for you, and how did it help? A few sentences is perfect.' }, 'text'),
+      ),
+    )
+    const text = form.querySelector('textarea[name="text"]')
+    text.maxLength = 1000
+    text.rows = 6
+    const counter = h('p', { class: 'askib-help askib-counter', text: '0 / 1000' })
+    text.closest('.askib-field').append(counter)
+    text.addEventListener('input', () => (counter.textContent = `${text.value.length} / 1000`))
+
+    // Photo
+    let photoData = ''
+    const photoId = `askib-f${++fieldSeq}`
+    const preview = h('div', { class: 'askib-photo-preview' })
+    const photoErr = h('p', { class: 'askib-err', id: `${photoId}-err`, 'aria-live': 'polite' })
+    const fileInput = h('input', { type: 'file', id: photoId, accept: 'image/jpeg,image/png,image/webp', class: 'askib-sr', 'aria-describedby': `${photoId}-err ${photoId}-help` })
+    const nameInput = form.querySelector('input[name="name"]')
+    const showPreview = () => preview.replaceChildren(avatar(nameInput.value || 'You', photoData, 'lg'))
+    nameInput.addEventListener('input', () => !photoData && showPreview())
+    const removeBtn = h('button', { type: 'button', class: 'askib-link', text: 'Remove photo', hidden: true })
+    removeBtn.addEventListener('click', () => {
+      photoData = ''
+      fileInput.value = ''
+      removeBtn.hidden = true
+      showPreview()
+    })
+    fileInput.addEventListener('change', async () => {
+      photoErr.textContent = ''
+      const file = fileInput.files[0]
+      if (!file) return
+      if (!/^image\/(jpeg|png|webp)$/.test(file.type)) {
+        photoErr.textContent = 'Please choose a JPG or PNG photo.'
+        fileInput.value = ''
+        return
+      }
+      if (file.size > PHOTO_MAX_UPLOAD) {
+        photoErr.textContent = 'That photo is over 15 MB. Please choose a smaller one.'
+        fileInput.value = ''
+        return
+      }
+      try {
+        photoData = await shrinkPhoto(file)
+        removeBtn.hidden = false
+        showPreview()
+      } catch {
+        photoErr.textContent = 'We could not read that photo. Please try another JPG or PNG.'
+        fileInput.value = ''
+      }
+    })
+    showPreview()
+    form.append(
+      h(
+        'div',
+        { class: 'askib-section' },
+        h('p', { class: 'askib-legend', text: 'Your photo' }),
+        h(
+          'div',
+          { class: 'askib-photo' },
+          preview,
+          h(
+            'div',
+            {},
+            h('label', { for: photoId, class: 'askib-secondary askib-file-btn', text: 'Choose a photo' }),
+            fileInput,
+            removeBtn,
+            h('p', { class: 'askib-help', id: `${photoId}-help`, text: 'Optional, but testimonials with a photo are far more convincing. A clear, front-facing photo of you (or your company logo) works best. JPG or PNG, up to 15 MB; we shrink it before sending.' }),
+            photoErr,
+          ),
+        ),
+      ),
+    )
+
+    form.append(h('div', { class: 'askib-hp', 'aria-hidden': 'true' }, h('label', {}, 'Leave this empty ', h('input', { type: 'checkbox', name: 'botcheck', tabindex: '-1', autocomplete: 'off' }))))
+    const consentId = `askib-f${++fieldSeq}`
+    form.append(
+      h(
+        'div',
+        { class: 'askib-field askib-check' },
+        h(
+          'label',
+          { for: consentId },
+          h('input', { type: 'checkbox', id: consentId, name: 'consent', value: 'Yes', required: true, 'aria-describedby': `${consentId}-err` }),
+          h('span', {}, 'I agree that ASKIB Engineers may publish my name, company, role, photo and this testimonial on its website and marketing. My email and phone stay private. See the ', h('a', { href: `${BASE}/privacy-policy`, text: 'privacy policy' }), '.'),
+        ),
+        h('p', { class: 'askib-err', id: `${consentId}-err`, 'aria-live': 'polite' }),
+      ),
+    )
+    const status = h('div', { class: 'askib-status', role: 'status', 'aria-live': 'polite' })
+    const button = h('button', { type: 'submit', class: 'askib-primary', text: 'Send my testimonial' })
+    form.append(status, button)
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault()
+      status.className = 'askib-status'
+      status.textContent = ''
+      let ok = validate(form)
+      if (text.value.trim().length < 20) {
+        const err = document.getElementById(text.getAttribute('aria-describedby'))
+        if (err) err.textContent = text.value.trim() ? 'Please write a little more (at least 20 characters)' : 'Enter your testimonial'
+        text.setAttribute('aria-invalid', 'true')
+        ok = false
+      }
+      if (!ok) {
+        status.className = 'askib-status askib-bad'
+        status.textContent = 'Please check the highlighted fields.'
+        form.querySelector('[aria-invalid="true"]')?.focus()
+        return
+      }
+      if (!FORM_ENDPOINT) {
+        status.className = 'askib-status askib-bad'
+        status.replaceChildren('This form is not connected yet. Please email your testimonial and photo to ', h('a', { href: `mailto:${OFFICE_EMAIL}?subject=Testimonial`, text: OFFICE_EMAIL }), '.')
+        return
+      }
+      const data = new FormData(form)
+      const ref = reference().replace(/^WEB-/, 'TST-')
+      if (data.get('botcheck') || Date.now() - startedAt < MIN_FILL_MS) return testimonialDone(form)
+      const get = (k) => String(data.get(k) || '').trim()
+      const t = { company: get('company'), role: get('role'), city: get('city'), phone: get('phone'), service: get('service'), rating: Number(get('rating')) || 0, text: get('text') }
+      const payload = {
+        kind: 'testimonial',
+        form: 'Testimonial',
+        reference: ref,
+        replyTo: get('email'),
+        name: get('name'),
+        page: location.href,
+        fillMs: Date.now() - startedAt,
+        botcheck: '',
+        fields: [],
+        testimonial: t,
+        photo: photoData || undefined,
+      }
+      button.disabled = true
+      button.textContent = 'Sending…'
+      try {
+        const res = await fetch(FORM_ENDPOINT, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(payload) })
+        const json = await res.json().catch(() => ({}))
+        if (!res.ok || json.ok !== true) throw new Error(json.error || `HTTP ${res.status}`)
+        testimonialDone(form)
+      } catch (err) {
+        console.error('[askib testimonial]', err)
+        status.className = 'askib-status askib-bad'
+        status.replaceChildren('Sorry, it could not be sent. Please try again, or email it to ', h('a', { href: `mailto:${OFFICE_EMAIL}?subject=Testimonial`, text: OFFICE_EMAIL }), '.')
+        button.disabled = false
+        button.textContent = 'Send my testimonial'
+      }
+    })
+    return form
+  }
+
+  function testimonialDone(form) {
+    const box = h(
+      'div',
+      { class: 'askib-done', role: 'status', tabindex: '-1', [OWN]: 'form' },
+      h('h3', { text: 'Thank you for your kind words.' }),
+      h('p', { text: 'We have received your testimonial. Our team will review it before it appears on the website.' }),
+      h('p', {}, h('a', { href: `${BASE}/testimonials`, text: 'See what other clients say' })),
+    )
+    form.replaceWith(box)
+    box.focus()
+  }
+
+  function renderTestimonialPage() {
+    if (pagePath() !== '/testimonial') return
+    const main = document.querySelector('main')
+    if (!main || main.querySelector(`[${OWN}="testimonial"]`)) return
+    if (!hydrated(main)) return later()
+    for (const c of main.children) c.style.display = 'none'
+    document.title = 'Share your experience | ASKIB'
+    const who = new URLSearchParams(location.search).get('name')
+    main.append(
+      h(
+        'section',
+        { class: 'askib-search-page askib-testimonial-page', [OWN]: 'testimonial' },
+        h('p', { class: 'askib-eyebrow', text: 'ASKIB Engineers Pvt Ltd' }),
+        h('h1', { text: who ? `Thank you, ${who}. How did we do?` : 'Share your experience with ASKIB' }),
+        h('p', { class: 'askib-lead', text: 'Your feedback helps other engineers and labs choose with confidence. It takes about two minutes. We read every testimonial before it appears on our website.' }),
+        buildTestimonialForm(),
+      ),
+    )
+  }
+
+  let approved
+  const loadApproved = () =>
+    (approved ??= FORM_ENDPOINT
+      ? fetch(`${FORM_ENDPOINT.replace(/\/$/, '')}/testimonials`)
+          .then((r) => (r.ok ? r.json() : { items: [] }))
+          .then((j) => (j.items || []).map((t) => ({ ...t, photo: t.photo && t.photo.startsWith('/') ? FORM_ENDPOINT.replace(/\/$/, '') + t.photo : t.photo })))
+          .catch(() => [])
+      : Promise.resolve([]))
+
+  const sameName = (a, b) => a && b && a.toLowerCase().replace(/\s+/g, ' ').trim() === b.toLowerCase().replace(/\s+/g, ' ').trim()
+
+  function testimonialCard(t) {
+    const who = [t.role, t.company].filter(Boolean).join(', ')
+    return h(
+      'li',
+      { class: 'askib-tcard' },
+      starsEl(t.rating),
+      h('blockquote', { text: `“${t.text}”` }),
+      h('div', { class: 'askib-author' }, avatar(t.name, t.photo, 'md'), h('p', {}, h('span', { class: 'askib-author-name', text: t.name }), who ? h('span', { class: 'askib-author-who', text: who }) : null, t.city ? h('span', { class: 'askib-author-who', text: t.city }) : null)),
+    )
+  }
+
+  /** Puts an avatar beside each testimonial the page already shows, and adds approved ones. */
+  async function decorateTestimonials() {
+    const path = pagePath()
+    if (path !== '/testimonials' && path !== '/') return
+    const main = document.querySelector('main')
+    if (!main || main.dataset.askibTestimonials) return
+    const quotes = [...main.querySelectorAll('blockquote')].filter((q) => !q.closest(`[${OWN}]`))
+    if (!quotes.length) return
+    if (!hydrated(main)) return later()
+    main.dataset.askibTestimonials = '1'
+    const list = await loadApproved()
+
+    const names = quotes.map((q) => q.nextElementSibling?.querySelector('p, span')?.textContent.trim() || '')
+    for (const [i, q] of quotes.entries()) {
+      const author = q.nextElementSibling
+      const name = names[i]
+      if (!author || !name || author.querySelector('.askib-avatar')) continue
+      const match = list.find((t) => sameName(t.name, name))
+      // Name and company stay stacked beside the avatar.
+      const text = h('span', { class: 'askib-author-text' })
+      text.append(...author.childNodes)
+      author.classList.add('askib-author-host')
+      author.append(avatar(name, match?.photo, 'md'), text)
+    }
+
+    const known = (t) => names.some((n) => sameName(n, t.name))
+    const extra = list.filter((t) => !known(t))
+    if (path === '/testimonials') {
+      const firstList = quotes[0].closest('ul')
+      const anchor = firstList || quotes[0].closest('div')
+      const cta = h('div', { class: 'askib-share-cta', [OWN]: 'cta' }, h('p', {}, h('strong', { text: 'Worked with us? ' }), 'We would love to hear how it went.'), h('a', { class: 'askib-primary', href: `${BASE}/testimonial`, text: 'Share your experience' }))
+      if (extra.length) {
+        const section = h('section', { class: 'askib-tsection', [OWN]: 'testimonials' }, h('h2', { text: 'From our clients' }), h('ul', { class: 'askib-tgrid' }, extra.map(testimonialCard)))
+        anchor.before(section)
+        section.after(cta)
+      } else anchor.before(cta)
+    } else {
+      const featured = extra.filter((t) => t.featured).slice(0, 3)
+      const show = (featured.length ? featured : extra).slice(0, 3)
+      if (!show.length) return
+      const home = main.querySelector('a[href$="/testimonials"]')?.closest('section')
+      if (!home) return
+      home.append(h('ul', { class: 'askib-tgrid askib-tgrid-home', [OWN]: 'testimonials' }, show.map(testimonialCard)))
+    }
+  }
+
+  // ── Catalogue (search, filters and sorting for products, services and spare parts) ──
+  const CATALOGUE_PAGES = ['/products', '/services', '/spare-parts']
+  let catalogueLoaded = false
+  function loadCatalogue() {
+    if (catalogueLoaded || !CATALOGUE_PAGES.includes(pagePath())) return
+    catalogueLoaded = true
+    document.head.append(h('script', { src: `${BASE}/static-site/catalogue.js?v=1`, defer: true }))
+  }
+
   // ── Wiring ─────────────────────────────────────────────────────────────────
   /** True once React has hydrated this element; changing the page before that breaks hydration. */
   const hydrated = (el) => Object.keys(el).some((k) => k.startsWith('__reactFiber'))
@@ -581,12 +938,17 @@
     for (const el of document.querySelectorAll(`[${OWN}="form"]`)) {
       if (el._anchor && !el._anchor.isConnected) el.remove()
     }
-    if (pagePath() !== '/search') {
-      for (const el of document.querySelectorAll(`[${OWN}="search"]`)) {
+    for (const [kind, path] of [['search', '/search'], ['testimonial', '/testimonial']]) {
+      if (pagePath() === path) continue
+      for (const el of document.querySelectorAll(`[${OWN}="${kind}"]`)) {
         for (const c of el.parentElement.children) c.style.display = ''
         el.remove()
       }
     }
+    // Client-side page change: the next page gets its own decoration.
+    const main = document.querySelector('main')
+    if (main && main.dataset.askibTestimonials && main.dataset.askibPath !== pagePath()) delete main.dataset.askibTestimonials
+    if (main) main.dataset.askibPath = pagePath()
   }
 
   let queued = false
@@ -595,6 +957,9 @@
     cleanUp()
     mountForms()
     renderSearchPage()
+    renderTestimonialPage()
+    decorateTestimonials()
+    loadCatalogue()
     hookHeaderSearch()
   }
   const schedule = () => {
@@ -603,6 +968,8 @@
       requestAnimationFrame(tick)
     }
   }
+
+  window.askibStatic = { BASE, h, hydrated, pagePath, OFFICE_EMAIL, OFFICE_PHONE }
 
   const start = () => {
     // Give React a moment to hydrate before touching the page.

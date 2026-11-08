@@ -76,3 +76,22 @@ Mail.Send as an application permission can send from any mailbox in the
 organisation. To limit the app to info@askib.in only, an Exchange admin can add
 an application access policy:
 https://learn.microsoft.com/graph/auth-limit-mailbox-access
+
+## Testimonials
+
+The same handler takes testimonials from askib.in/testimonial (see
+`static-site/README.md` for how to approve them). On the first one it adds a
+**Testimonials** sheet (Status drop-down: Pending, Approved, Rejected) and adds
+a few lines about it to the **How to use** sheet. Photos go into a
+**Testimonial photos** folder next to the workbook. No new permissions are
+needed: it uses the same Mail.Send and Files.ReadWrite.All.
+
+It also answers two public addresses the website reads:
+
+- `GET /testimonials`: approved testimonials only (name, company, role, city,
+  rating, text, photo link; never email or phone), cached for 5 minutes.
+- `GET /testimonials/photo/<Reference>.jpg`: the photo of an approved
+  testimonial, cached for a day.
+
+After updating `worker.js` in Cloudflare (Edit code → paste → Deploy), open
+`https://<your worker>/testimonials`; it should show `{"ok":true,"items":[]}`.
