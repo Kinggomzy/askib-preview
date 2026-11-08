@@ -155,6 +155,7 @@ for (const [kind, url] of [['products', '/products'], ['services', '/services']]
     eyebrow: undef(x.eyebrow),
     image: x.image && undef(x.image) ? { url: x.image.url, alt: undef(x.image.alt) || '' } : null,
     price: typeof x.sort?.price === 'number' ? x.sort.price : null,
+    newest: typeof x.sort?.newest === 'number' ? x.sort.newest : undefined,
     priceText: undef(x.price?.text),
     was: undef(x.price?.was),
     off: undef(x.price?.off),

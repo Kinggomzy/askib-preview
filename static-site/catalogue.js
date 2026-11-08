@@ -215,7 +215,7 @@
 
   // ── Products and services: the lists build.mjs saved from the export ──────
   function fromExport(data) {
-    return data.items.map((x, i) => {
+    const items = data.items.map((x, i) => {
       const money = (t) => num(String(t || '').match(/[\d,]+(?:\.\d+)?/)?.[0])
       const labels = {}
       for (const g of data.filters) {
@@ -236,7 +236,7 @@
         partNo: x.model || '',
         oem: [],
         compat: [],
-        date: Number(x.id) || 0,
+        date: typeof x.newest === 'number' ? -x.newest : Number(x.id) || 0,
         pop: x.featured ? 1 : 0,
         featured: Boolean(x.featured),
         order: i,
@@ -248,6 +248,8 @@
         cta: data.kind === 'products' ? { href: `${BASE}/request-a-quote/product?product=${x.id}`, label: 'Request a quote' } : { href: `${BASE}/request-a-service`, label: 'Request this service' },
       }
     })
+    items.filters = data.filters
+    return items
   }
 
   // ── Page set-ups ───────────────────────────────────────────────────────────
@@ -283,14 +285,7 @@
       source: 'catalogue-products.json',
       noun: ['product', 'products'],
       placeholder: 'Search products, models or standards…',
-      facets: [
-        { id: 'range', label: 'Category', order: 'alpha' },
-        { id: 'brand', label: 'Brand', order: 'alpha' },
-        { id: 'availability', label: 'Availability' },
-        { id: 'industry', label: 'Industry', order: 'alpha' },
-        { id: 'standard', label: 'Standard', order: 'alpha' },
-        { id: 'tag', label: 'Topic', order: 'alpha' },
-      ],
+      facets: 'auto', // the filter groups saved with the list, in the CMS's order
       price: true,
       sorts: ['relevance', 'featured', 'price-asc', 'price-desc', 'name-asc', 'name-desc', 'newest'],
     },
@@ -299,14 +294,7 @@
       source: 'catalogue-services.json',
       noun: ['service', 'services'],
       placeholder: 'Search tests, calibration, standards…',
-      facets: [
-        { id: 'kind', label: 'Service type', order: 'alpha' },
-        { id: 'area', label: 'Service area', order: 'alpha' },
-        { id: 'where', label: 'Where' },
-        { id: 'industry', label: 'Industry', order: 'alpha' },
-        { id: 'standard', label: 'Standard', order: 'alpha' },
-        { id: 'tag', label: 'Topic', order: 'alpha' },
-      ],
+      facets: 'auto',
       price: true,
       sorts: ['relevance', 'featured', 'price-asc', 'price-desc', 'name-asc', 'name-desc', 'newest'],
     },
@@ -368,7 +356,8 @@
     if (cfg.finder) {
       facets.push({ id: 'make', label: 'Machine make', order: 'alpha', fit: true }, { id: 'model', label: 'Machine model', order: 'alpha', fit: true, dependent: true }, { id: 'year', label: 'Machine year', type: 'range', unit: 'year', fit: true })
     }
-    for (const f of cfg.facets) facets.push(f)
+    const defs = cfg.facets === 'auto' ? (items.filters || []).map((g) => ({ id: g.id, label: g.label, order: ['availability', 'condition', 'itemType', 'genuine', 'where'].includes(g.id) ? undefined : 'alpha' })) : cfg.facets
+    for (const f of defs) facets.push(f)
     const yearBounds = (() => {
       const ys = items.flatMap((i) => i.compat.flatMap((c) => [c.from, c.to])).filter(Boolean)
       return ys.length ? [Math.min(...ys), Math.max(...ys)] : null
