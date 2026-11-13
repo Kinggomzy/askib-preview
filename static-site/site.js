@@ -17,7 +17,7 @@
   const FORM_ENDPOINT = '' // ← paste the form handler's address here (https://….workers.dev)
   const OFFICE_EMAIL = 'info@askib.in'
   const OFFICE_PHONE = '+91 91637 90000'
-  const BASE = '' // the site is served from the domain root
+  const BASE = '/askib-preview' // the site is served from the domain root
   /** Submissions sent faster than this after the page opened are treated as bots. */
   const MIN_FILL_MS = 3000
 
