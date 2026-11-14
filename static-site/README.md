@@ -12,7 +12,7 @@ or run searches. The files here add both back:
 - `site.css` styles the forms and search results with the site's own colours.
 - `search-index.json` and `products.json` are generated; do not edit them.
 - `build.mjs` adds the two files to every page, regenerates the index and adds
-  the `/search` page. Run it after every new export: `node static-site/build.mjs`.
+  the `/search` page. Run it after every new export: `node static-site/build.mjs` (scripts/static-preview.mjs does this for you).
 
 ## Connecting the forms
 
